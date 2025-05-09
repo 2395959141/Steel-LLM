@@ -460,72 +460,66 @@ class ChineseFineWebEduFormatHandler(FormatHandler):
     
     """
     def __init__(self, input_path, output_path, dataset_name):
-        super(ChineseFineWebEduFormatHandler, self).__init__(input_path, output_path, dataset_name)
+        super().__init__(input_path, output_path, dataset_name)
 
     def get_file_list(self) -> list:
         """获取目录下的所有 .parquet 文件"""
-        import os
-        return [os.path.join(self.input_path, f) for f in os.listdir(self.input_path) if f.endswith('.parquet')]
-
-    def process_one_line(self, line, fout) -> bool:
-        """处理单行数据，解析JSON，提取有效字段并写入输出"""
-        try:
-            data = json.loads(line)
-            text = data.get("text", "")
-            score = data.get("score", 0)
-            source = data.get("source", "")
-            
-            # 中文文本处理
-            processed_text = self.zh_process(text)
-            
-            # 质量检查
-            if not self.quality_assurance(processed_text):
-                return False
-                
-            # 构建输出数据
-            output = {
-                "text": processed_text,
-                "source": source,
-                "score": score
-            }
-            fout.write(json.dumps(output, ensure_ascii=False) + "\n")
-            return True
-            
-        except Exception as e:
-            print(f"处理中文教育网络数据时出错：{str(e)}")
-            return False
+        files = os.listdir(self.input_path)
+        files = [i for i in files if ".parquet" in i]
+        return files
 
     def process_one_file(self, file_path):
         line_count = 0
         jump_count = 0
-
-         # 读取 .parquet 文件
-        data = pd.read_parquet(file_path)
         
-        # 验证数据格式
-        required_columns = ['text', 'score', 'source']
-        if not all(col in data.columns for col in required_columns):
-            return 0, 0  # 格式不符合要求直接跳过
-
-        with open(self.output_path, 'a', encoding='utf-8') as fout:
-                # 遍历每个文本条目
-            for text, score, source in zip(data['text'], data['score'], data['source']):
-                line_count += 1              
-                        
-                # 文本清洗
-                cleaned_text = self.zh_process(text)
-                if not self.quality_assurance(cleaned_text):
+        with open(self.output_path, "a") as fout:
+            # 仿照ZhihuFormatHandler的方式读取parquet文件
+            table = pq.read_table(self.input_path + "/" + file_path)
+            data = table.to_pydict()
+            
+            # 检查必要的列是否存在
+            if "text" not in data:
+                print(f"[warning] 文件 {file_path} 中找不到text列")
+                return 0, 0
+                
+            # 获取各列数据
+            texts = data["text"]
+            scores = data.get("score", [0] * len(texts))
+            sources = data.get("source", ["unknown"] * len(texts))
+            
+            # 处理每一行数据
+            total_num = len(texts)
+            for i in range(total_num):
+                line_count += 1
+                
+                # 处理文本
+                text = self.zh_process(texts[i])
+                
+                # 质量检查
+                if not self.quality_assurance(text):
                     jump_count += 1
                     continue
-                        
-                # 构建输出格式
-                output_data = {
-                    "text": cleaned_text,
-                    "source": source,
-                    "score": score
-                }
-                fout.write(json.dumps(output_data, ensure_ascii=False) + "\n")
-        
+                
+                # 构建输出结果
+                try:
+                    score_value = float(scores[i]) if i < len(scores) else 0.0
+                    source_value = sources[i] if i < len(sources) else "unknown"
+                    
+                    output = {
+                        "text": text,
+                        "score": score_value,
+                        "source": source_value
+                    }
+                    
+                    fout.write(json.dumps(output, ensure_ascii=False) + "\n")
+                except Exception as e:
+                    print(f"[exception][{self.dataset_name}] 处理第 {i} 行时出错: {e}")
+                    jump_count += 1
+                    
+                # 打印处理进度
+                if line_count % 10000 == 0:
+                    print(f"[progress][{self.dataset_name}] 已处理 {line_count} 行，成功 {line_count - jump_count} 行")
+                    
         return line_count, jump_count
 
 
@@ -542,10 +536,30 @@ class CCI3_HQFormatHandler(FormatHandler):
         super().__init__(input_path, output_path, dataset_name)
 
     def get_file_list(self) -> list:
-        """获取目录下所有.jsonl文件"""
-        import os
-        return [os.path.join(self.input_path, f) for f in os.listdir(self.input_path) 
-                if f.endswith('.jsonl')]
+        """获取输入路径下的所有jsonl文件"""
+        # 检查路径是否已经包含目标子目录
+        if os.path.basename(self.input_path) == "BAAI":
+            # 直接拼接完整路径
+            base_path = os.path.join(self.input_path, "CCI3-HQ/data")
+        else:
+            # 如果输入路径已经包含了CCI3-HQ，则直接使用
+            if "CCI3-HQ" in self.input_path:
+                if os.path.exists(os.path.join(self.input_path, "data")):
+                    base_path = os.path.join(self.input_path, "data")
+                else:
+                    base_path = self.input_path
+            else:
+                base_path = self.input_path
+        
+        # 检查路径是否存在
+        if not os.path.exists(base_path):
+            print(f"[warning] 路径不存在: {base_path}")
+            return []
+        
+        # 获取所有jsonl文件
+        files = [os.path.join(base_path, f) for f in os.listdir(base_path) if f.endswith(".jsonl")]
+        print(f"[log][{self.dataset_name}] 在{base_path}中找到{len(files)}个jsonl文件")
+        return files
 
     def process_one_line(self, line, fout) -> bool:
         """处理单行数据"""
@@ -620,10 +634,10 @@ def main_run():
         os.makedirs(output_path_root)
 
     dataset_process_info = {
-        "baidu_baike": (input_path_root + "/fq980207", BaiduBaikeFormatHandler),  #* 16G
-        "chinese_fine_web_edu": (input_path_root + "/opencsg", ChineseFineWebEduFormatHandler),  #* 122G
+        "baidu_baike": (input_path_root + "/fq980207/563w_baidubaike", BaiduBaikeFormatHandler),  #* 16G
+        "chinese_fine_web_edu": (input_path_root + "/opencsg/chinese-fineweb-edu/data", ChineseFineWebEduFormatHandler),  #* 122G
         "wiki_cn": (input_path_root + "/AI-ModelScope", WikiCNFormatHandler),
-        "cc_i3_HQ": (input_path_root + "/BAAI", CCI3_HQFormatHandler),
+        "cc_i3_HQ": (input_path_root + "/BAAI/CCI3-HQ/data", CCI3_HQFormatHandler),
 
 
 
@@ -656,7 +670,7 @@ def main_run():
 
 
 if __name__ == "__main__":
-    test_mode = True
+    test_mode = False
     if test_mode:
         test_run()
     else: 
