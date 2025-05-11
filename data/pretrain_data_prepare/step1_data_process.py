@@ -587,6 +587,130 @@ class CCI3_HQFormatHandler(FormatHandler):
 
 
 
+class IndustryCorpus2FormatHandler(FormatHandler):
+    """处理IndustryCorpus2数据集（jsonl格式）
+    示例数据格式：
+    {
+        "text": "《农村财政与财务》杂志创办于1996...",
+        "alnum_ratio": 0.914692,
+        "avg_line_length": 158.25,
+        "char_rep_ratio": 0.044444,
+        "flagged_words_ratio": 0,
+        "max_line_length":223,
+        "num_words":404,
+        "perplexity":858.6,
+        "quality_score":4.0625,
+        "special_char_ratio":0.100053,
+        "word_rep_ratio":0.088773,
+        "id":200,200,005,357,
+        "industry_type":"住宿_餐饮_酒店"
+    }
+    """
+    def __init__(self, input_path, output_path, dataset_name):
+        super().__init__(input_path, output_path, dataset_name)
+    
+    def get_file_list(self) -> list:
+        """获取输入路径下及其所有子目录中的parquet文件"""
+        all_files = []
+        
+        def traverse_directory(dir_path):
+            try:
+                for item in os.listdir(dir_path):
+                    item_path = os.path.join(dir_path, item)
+                    if os.path.isdir(item_path):
+                        # 递归搜索子目录
+                        traverse_directory(item_path)
+                    elif item.endswith(".parquet"):
+                        # 添加找到的parquet文件
+                        all_files.append(item_path)
+            except Exception as e:
+                print(f"[warning] 读取目录 {dir_path} 时出错: {e}")
+                
+        # 从根目录开始递归搜索
+        traverse_directory(self.input_path)
+        print(f"[log][{self.dataset_name}] 在所有子目录中找到{len(all_files)}个parquet文件")
+        return all_files
+
+    def process_one_file(self, file_path):
+        line_count = 0
+        jump_count = 0
+        
+        with open(self.output_path, "a") as fout:
+            try:
+                # 读取parquet文件
+                table = pq.read_table(file_path)
+                data = table.to_pydict()
+                
+                # 检查必要的列是否存在
+                if "text" not in data:
+                    print(f"[warning] 文件 {file_path} 中找不到text列")
+                    return 0, 0
+                    
+                # 获取各列数据
+                texts = data["text"]
+                industry_types = data.get("industry_type", ["unknown"] * len(texts))
+                quality_scores = data.get("quality_score", [0.0] * len(texts))
+                ids = data.get("id", [0] * len(texts))
+                
+                # 提取其他特征列，如果存在的话
+                features = {}
+                for key in ["alnum_ratio", "avg_line_length", "char_rep_ratio", 
+                           "flagged_words_ratio", "max_line_length", "num_words", 
+                           "perplexity", "special_char_ratio", "word_rep_ratio"]:
+                    if key in data:
+                        features[key] = data[key]
+                    
+                # 处理每一行数据
+                total_num = len(texts)
+                for i in range(total_num):
+                    line_count += 1
+                    
+                    # 处理文本
+                    text = self.zh_process(texts[i])
+                    
+                    # 质量检查 - 使用基本质量过滤以及基于quality_score的附加筛选
+                    if not self.quality_assurance(text):
+                        jump_count += 1
+                        continue
+                    
+                    # 构建输出结果
+                    try:
+                        output = {
+                            "text": text,
+                            "industry_type": industry_types[i] if i < len(industry_types) else "unknown",
+                            "quality_score": float(quality_scores[i]) if i < len(quality_scores) else 0.0,
+                            "id": ids[i] if i < len(ids) else 0
+                        }
+                        
+                        # 添加其他特征，如果存在
+                        for key, values in features.items():
+                            if i < len(values):
+                                try:
+                                    output[key] = float(values[i]) if isinstance(values[i], (int, float)) else values[i]
+                                except:
+                                    output[key] = values[i]
+                        
+                        fout.write(json.dumps(output, ensure_ascii=False) + "\n")
+                    except Exception as e:
+                        print(f"[exception][{self.dataset_name}] 处理第 {i} 行时出错: {e}")
+                        jump_count += 1
+                        
+                    # 打印处理进度
+                    if line_count % 10000 == 0:
+                        print(f"[progress][{self.dataset_name}] 文件 {os.path.basename(file_path)} 已处理 {line_count} 行，成功 {line_count - jump_count} 行")
+                        
+            except Exception as e:
+                print(f"[exception][{self.dataset_name}] 处理文件 {file_path} 失败: {e}")
+                print(traceback.format_exc())
+                
+        return line_count, jump_count
+
+
+
+
+
+
+
 def test_run():
     """简单测试"""
     script_directory = os.path.dirname(os.path.realpath(__file__))
@@ -601,7 +725,7 @@ def test_run():
         "cc_i3_HQ": CCI3_HQFormatHandler,
         "baidu_baike": BaiduBaikeFormatHandler,
         "wiki_cn": WikiCNFormatHandler,
-
+        "industry_corpus2": IndustryCorpus2FormatHandler,
         # "baidu_QA": BaiduQAFormatHandler,
         # "BELLE": BELLEFormatHandler,
         # "BELLE_conversations": BELLEConversationsFormatHandler,
@@ -640,7 +764,7 @@ def main_run():
         #"chinese_fine_web_edu": (input_path_root + "/opencsg/chinese-fineweb-edu/data", ChineseFineWebEduFormatHandler),  #* 122G
         #"wiki_cn": (input_path_root + "/AI-ModelScope", WikiCNFormatHandler),
         #"cc_i3_HQ": (input_path_root + "/BAAI/CCI3-HQ/data", CCI3_HQFormatHandler),
-
+        "industry_corpus2": (input_path_root + "/BAAI/IndustryCorpus2", IndustryCorpus2FormatHandler),
 
 
         # "baidu_QA": (input_path_root + "/baidu_wenda", BaiduQAFormatHandler),
@@ -662,13 +786,13 @@ def main_run():
         fh.process_all()
 
     # 代码数据单独处理
-    dataset_name = "starcode"
-    input_path = input_path_root + "/swift/starcoderdata"
-    output_path = output_path_root + "/processed_{}.jsonl".format(dataset_name)
-    if os.path.exists(output_path):
-        os.remove(output_path)
-    fh = StarcodeFormatHandler(input_path, output_path, dataset_name, ["cpp", "java", "python"])
-    fh.process_all()
+    #dataset_name = "starcode"
+    #input_path = input_path_root + "/swift/starcoderdata"
+    #output_path = output_path_root + "/processed_{}.jsonl".format(dataset_name)
+    #if os.path.exists(output_path):
+    #    os.remove(output_path)
+    #fh = StarcodeFormatHandler(input_path, output_path, dataset_name, ["cpp", "java", "python"])
+    #fh.process_all()
 
 
 if __name__ == "__main__":
