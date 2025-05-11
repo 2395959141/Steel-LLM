@@ -557,7 +557,9 @@ class CCI3_HQFormatHandler(FormatHandler):
             return []
         
         # 获取所有jsonl文件
-        files = [os.path.join(base_path, f) for f in os.listdir(base_path) if f.endswith(".jsonl")]
+        #files = [os.path.join(base_path, f) for f in os.listdir(base_path) if f.endswith(".jsonl")]
+        # 获取所有jsonl文件（返回相对路径）
+        files = [f for f in os.listdir(base_path) if f.endswith(".jsonl")]
         print(f"[log][{self.dataset_name}] 在{base_path}中找到{len(files)}个jsonl文件")
         return files
 
@@ -620,7 +622,7 @@ def test_run():
 
     # 代码数据单独处理
     dataset_name = "starcode"
-    input_path = "swift"
+    input_path = "swift/starcoderdata"
     output_path = output_path_root + "/processed_{}.jsonl".format(dataset_name)
     if os.path.exists(output_path):
         os.remove(output_path)
@@ -634,10 +636,10 @@ def main_run():
         os.makedirs(output_path_root)
 
     dataset_process_info = {
-        "baidu_baike": (input_path_root + "/fq980207/563w_baidubaike", BaiduBaikeFormatHandler),  #* 16G
-        "chinese_fine_web_edu": (input_path_root + "/opencsg/chinese-fineweb-edu/data", ChineseFineWebEduFormatHandler),  #* 122G
-        "wiki_cn": (input_path_root + "/AI-ModelScope", WikiCNFormatHandler),
-        "cc_i3_HQ": (input_path_root + "/BAAI/CCI3-HQ/data", CCI3_HQFormatHandler),
+        #"baidu_baike": (input_path_root + "/fq980207/563w_baidubaike", BaiduBaikeFormatHandler),  #* 16G
+        #"chinese_fine_web_edu": (input_path_root + "/opencsg/chinese-fineweb-edu/data", ChineseFineWebEduFormatHandler),  #* 122G
+        #"wiki_cn": (input_path_root + "/AI-ModelScope", WikiCNFormatHandler),
+        #"cc_i3_HQ": (input_path_root + "/BAAI/CCI3-HQ/data", CCI3_HQFormatHandler),
 
 
 
@@ -661,7 +663,7 @@ def main_run():
 
     # 代码数据单独处理
     dataset_name = "starcode"
-    input_path = input_path_root + "/swift"
+    input_path = input_path_root + "/swift/starcoderdata"
     output_path = output_path_root + "/processed_{}.jsonl".format(dataset_name)
     if os.path.exists(output_path):
         os.remove(output_path)
