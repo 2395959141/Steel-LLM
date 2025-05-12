@@ -168,7 +168,7 @@ filename_sets = {
 def prepare(
     source_path: Path = Path("/"),
     # tokenizer地址
-    checkpoint_dir: Path = Path("/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2.5-0.5B-Instruct"),
+    checkpoint_dir: Path = Path("/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2___5-0___5B-Instruct"),
     destination_path: Path = Path("/DATA/disk2/yuhang/.cache/steel_dataset/step3_final_data/"),
     sample: bool = False,
     match: str = "",
