@@ -35,7 +35,7 @@ def process_jsonl_file(set_name, file_dir, builder, tokenizer, cache_lines_num):
             counter += 1
             # 不同数据集存的字段不一样
             try:
-                if set_name=="sky" or set_name=="starcode" or set_name == "chat":
+                if set_name=="baike" or set_name=="starcode" or set_name == "cc_i3_HQ" or set_name == "chinese_fine_web_edu" or set_name == "industry_corpus2":
                     text = json.loads(row)["text"]
                 elif set_name=="wanjuan_zh" or set_name=="wanjuan_en":
                     text = json.loads(row)
