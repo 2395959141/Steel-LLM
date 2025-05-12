@@ -81,6 +81,64 @@ def multiprocess_data(set_name, file_dir_list, builder, tokenizer, cache_lines_n
     except Exception  as e:
         print(f"multiprocess error:  {str(e)}")
 
+def process_file_range(set_name, file_path, builder, tokenizer, cache_lines_num, start_line, end_line, process_idx):
+    """处理文件的指定行范围"""
+    try:
+        t0 = time.time()
+        cache_text = ""
+        line_count = 0
+        processed_count = 0
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            # 跳过之前的行
+            for _ in range(start_line):
+                next(f)
+                line_count += 1
+            
+            # 处理分配的行范围
+            for row in tqdm(f, desc=f"Process {process_idx}", total=end_line-start_line):
+                line_count += 1
+                if line_count > end_line:
+                    break
+                    
+                try:
+                    # 提取文本的逻辑与原函数相同
+                    if set_name=="baike" or set_name=="starcode" or set_name == "cc_i3_HQ" or set_name == "chinese_fine_web_edu" or set_name == "industry_corpus2":
+                        text = json.loads(row)["text"]
+                    elif set_name=="wanjuan_zh" or set_name=="wanjuan_en":
+                        # 原有逻辑...
+                        pass
+                    else:
+                        raise NameError(f"process_file_range not have {set_name}")
+                except Exception as e:
+                    print(f"Process {process_idx}: line {line_count} read error: {e}")
+                    continue
+                
+                text += "<|im_end|>"
+                cache_text += text
+                processed_count += 1
+                
+                if processed_count % cache_lines_num == 0:
+                    text_ids = process_line_text(text=cache_text, tokenizer=tokenizer)
+                    builder.add_array(np.array(text_ids, dtype=builder.dtype))
+                    cache_text = ""
+            
+            # 处理剩余内容
+            if cache_text != "":
+                text_ids = process_line_text(text=cache_text, tokenizer=tokenizer)
+                builder.add_array(np.array(text_ids, dtype=builder.dtype))
+        
+        print(f"Process {process_idx} 完成: 处理了 {processed_count} 行, 耗时 {time.time()-t0}s")
+        print(f"{builder._prefix} 共有 {builder._counter+1} 文件, {builder.all_tokens} tokens")
+        
+        if builder._idx/builder._chunk_size > 0.05:
+            builder.write_reminder()
+        else:
+            print(f"剩余部分过小 {builder._idx/builder._chunk_size}")
+            
+    except Exception as e:
+        print(f"Process {process_idx} 错误: {str(e)}")
+
 def prepare_full(
     source_path: Path, checkpoint_dir: Path, destination_path: Path, chunk_size: int, 
     match: str = "", max_files = 100000000000000, cache_lines_num = 1000, process_num=16
@@ -135,14 +193,29 @@ def prepare_full(
             )
             builder_list.append(builder)
 
-        if process_num==1:
-            builder = builder_list[0]
-            a_process_filenames = [source_path / name for name in filenames]
-            multiprocess_data(set_name=set_name,file_dir_list=a_process_filenames, builder=builder,
-                                tokenizer=tokenizer, cache_lines_num=cache_lines_num,process_idx=0)
-            print(f"all chunks: {builder._counter}  all tokens: {builder.all_tokens}...")
-            # 将cache里边剩余的内容写入
-            builder.write_reminder()
+        # 如果只有一个文件但需要多进程处理
+        if len(filenames) == 1 and process_num > 1:
+            file_path = source_path / filenames[0]
+            # 计算文件总行数
+            total_lines = sum(1 for _ in open(file_path, 'r', encoding='utf-8'))
+            print(f"文件 {file_path} 共有 {total_lines} 行")
+            
+            # 计算每个进程处理的行数范围
+            lines_per_process = total_lines // process_num
+            process_list = []
+            
+            for process_idx in range(process_num):
+                start_line = process_idx * lines_per_process
+                end_line = (process_idx + 1) * lines_per_process if process_idx < process_num - 1 else total_lines
+                
+                process_list.append(mp.Process(
+                    target=process_file_range, 
+                    args=(set_name, file_path, builder_list[process_idx], tokenizer, 
+                          cache_lines_num, start_line, end_line, process_idx)
+                ))
+            
+            [p.start() for p in process_list]
+            [p.join() for p in process_list]
         else:
             process_list = []
             for process_idx in range(process_num):
