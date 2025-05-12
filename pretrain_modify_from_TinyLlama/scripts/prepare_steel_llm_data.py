@@ -66,7 +66,7 @@ def multiprocess_data(set_name, file_dir_list, builder, tokenizer, cache_lines_n
     try:
         for file_dir in file_dir_list:
             t0 = time.time()
-            if set_name in ["sky", "wanjuan_zh", "wanjuan_en", "starcode","chat"]:
+            if set_name in ["baike", "cc_i3_HQ", "chinese_fine_web_edu","industry_corpus2","starcode"]:
                 process_jsonl_file(set_name=set_name, file_dir=file_dir, builder=builder,
                         tokenizer=tokenizer, cache_lines_num=cache_lines_num)
             else:
@@ -159,16 +159,16 @@ def prepare_full(
 
 
 filename_sets = {
-    # "sky": "data1/step0_rawdata/sky/data/*jsonl",
-    # "wanjuan_zh": "data2/step2_data_cleaning/wanjuan/wanjuan_zh/*jsonl",
-    # "wanjuan_en": "data2/step2_data_cleaning/wanjuan/wanjuan_en/*jsonl",
-    # "starcode": "data1/step2_data_cleaning/data_juicer_clean_code_data/*jsonl*"
-    "chat": "data1/step2_data_cleaning/data_juicer_clean_text_data/txt_data/*jsonl"
+    "baike": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_baidu_baike.jsonl",
+    "cc_i3_HQ": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_cc_i3_HQ.jsonl",
+    "chinese_fine_web_edu": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_chinese_fine_web_edu.jsonl",
+    "industry_corpus2": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_industry_corpus2.jsonl",
+    "starcode": "/DATA/disk2/yuhang/.cache/steel_dataset/data_juicer_clean_code_data/dataset_starcode.jsonl"
 }
 def prepare(
     source_path: Path = Path("/"),
     # tokenizer地址
-    checkpoint_dir: Path = Path("../model/tokenizer_from_qwen_moe_chat"),
+    checkpoint_dir: Path = Path("/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2.5-0.5B-Instruct"),
     destination_path: Path = Path("/data1/step3_final_data/chat"),
     sample: bool = False,
     match: str = "",
