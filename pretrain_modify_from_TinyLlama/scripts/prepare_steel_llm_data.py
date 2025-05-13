@@ -252,9 +252,9 @@ def prepare(
     # blocks_in_a_chunck=1024时，一个chunk是8M大小 
     blocks_in_a_chunck = 1024*200,
     # 读取cache_lines_num行json数据后进行一次保存
-    cache_lines_num = 50,
+    cache_lines_num = 35,
     # 处理数据进程数
-    process_num = 64
+    process_num = 60
 
 
 ) -> None:
