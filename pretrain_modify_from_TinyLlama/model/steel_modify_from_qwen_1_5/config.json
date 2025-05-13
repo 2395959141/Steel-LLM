@@ -7,7 +7,7 @@
     "AutoModelForCausalLM": "modeling_steel.SteelForCausalLM"
   },
   "attention_dropout": 0.0,
-  "bos_token_id": 151643,
+  "bos_token_id": null,
   "eos_token_id": 151645,
   "hidden_act": "silu",
   "hidden_size": 1792,
@@ -27,7 +27,7 @@
   "transformers_version": "4.37.0",
   "use_cache": true,
   "use_sliding_window": false,
-  "vocab_size": 151936,
+  "vocab_size": 151665,
   "_attn_implementation": "sdpa",
   "n_experts": 6,
   "mlp_div_ratio":4,
