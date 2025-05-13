@@ -36,9 +36,9 @@ parent_dir = os.path.dirname(current_dir)
 # recurrentgemma: too slow
 # sys.path.append(os.path.join(parent_dir, "model", "recurrentgemma"))
 # from modeling_recurrent_gemma import RecurrentGemmaForCausalLM, RecurrentGemmaDecoderLayer
-# Steel LLM model
+#! 导入Steel-LLM模型
 sys.path.append(os.path.join(parent_dir, "model", "steel_modify_from_qwen_1_5"))
-from modeling_steel import SteelForCausalLM, SteelDecoderLayer
+from model.steel_modify_from_qwen_1_5.modeling_steel import SteelForCausalLM, SteelDecoderLayer
 from steel_llm_utils import compatible_tiny_llama_config
 
 import logging
@@ -46,8 +46,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 # model_name = "steel_llm_test_qwen1"
 name = "steel_llm"
-out_dir = Path("/data/gu_data/ckpt") / name
-TRAIN_DATA_DIR = Path("/data/gu_data/step3_input")
+out_dir = Path("/DATA/disk2/yuhang/.cache/ckpt") / name
+TRAIN_DATA_DIR = Path("/DATA/disk2/yuhang/.cache/steel_dataset/step3_final_data/")
 # TRAIN_DATA_DIR = Path("/data/step3_train_input/test")
 MODEL_PATH = "../model/steel_modify_from_qwen_1_5"
 # todo: check block size
@@ -62,32 +62,36 @@ ADD_NEW_DATA_DIR = None
 IGNORE_INDEX = 151643
 USE_FLASH_ATTN =True # "auto"
 
-# Hyperparameters
-num_of_devices = 8
+#! 设置超参数
+#! 训练设备和批量大小设置
+num_of_devices = 4
 global_batch_size = 64*num_of_devices
 learning_rate = 3e-4
-micro_batch_size = 8
+micro_batch_size = 16
 # cal step 1: 1640*10**9/4/2048/512 
 # cal day 1: 1800*10**9/4/2048/8/1.4/8/3600/24
 # cal day2: 1640*10**9/4/8/23800/3600/24
 max_step = 430000*2+220000
 # lr scheduler
+#! 学习率调度器相关参数
 decay_lr = True
 lr_decay_step = int(max_step)
 min_lr = 0.0
 warmup_steps = 1_000
-#---
+
+#! 日志和检查点相关参数
 log_step_interval = 20
 eval_iters = 100 # eval iter
 save_step_interval = 20000
 eval_step_interval = 20000
  
-
+#! 优化器相关参数
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0
 
+#! 梯度累积相关参数
 batch_size = global_batch_size // num_of_devices
 gradient_accumulation_steps = batch_size // micro_batch_size
 assert gradient_accumulation_steps > 0
@@ -100,9 +104,13 @@ log_iter_interval = log_step_interval * gradient_accumulation_steps
 
 
 # Treat all dataset equally by their size. If you want to use a different weight for a dataset, add it to the list with the weight.
-# 数据根目录下的文文件名开头，""为匹配所有文件
+#! 数据根目录下的文文件名开头，""为匹配所有文件
 train_data_config = [
-    ("", 1),
+    ("baike", 9.4),
+    ("cc_ic_HQ", 491),
+    ("chinese_fine_web_edu", 174),
+    ("industry_corpus2", 634),
+    ("star_code", 147),
 ]
 
 val_data_config = [

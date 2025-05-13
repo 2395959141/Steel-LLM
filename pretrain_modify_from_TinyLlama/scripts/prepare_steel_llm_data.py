@@ -232,17 +232,17 @@ def prepare_full(
 
 
 filename_sets = {
-    "baike": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_baidu_baike.jsonl",
-    "cc_i3_HQ": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_cc_i3_HQ.jsonl",
-    "chinese_fine_web_edu": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_chinese_fine_web_edu.jsonl",
-    "industry_corpus2": "/DATA/disk2/yuhang/.cache/steel_dataset/step1_unified_format/processed_industry_corpus2.jsonl",
-    "starcode": "/DATA/disk2/yuhang/.cache/steel_dataset/data_juicer_clean_code_data/dataset_starcode.jsonl"
+    "baike": "/DATA/disk2/yuhang/.cache/steel_dataset/step2_split_jsonl/baidu_baike/*.jsonl",
+    #"cc_i3_HQ": "/DATA/disk2/yuhang/.cache/steel_dataset/step2_split_jsonl/cc_ic_HQ/*.jsonl",
+    #"chinese_fine_web_edu": "/DATA/disk2/yuhang/.cache/steel_dataset/step2_split_jsonl/chinese_fine_web_edu/*.jsonl",
+    #"industry_corpus2": "/DATA/disk2/yuhang/.cache/steel_dataset/step2_split_jsonl/industry_corpus2/*.jsonl",
+    #"starcode": "/DATA/disk2/yuhang/.cache/steel_dataset/step2_split_jsonl/star_code/*.jsonl"
 }
 def prepare(
     source_path: Path = Path("/"),
     # tokenizer地址
     checkpoint_dir: Path = Path("/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2___5-0___5B-Instruct"),
-    destination_path: Path = Path("/DATA/disk2/yuhang/.cache/steel_dataset/step3_final_data/"),
+    destination_path: Path = Path("/DATA/disk2/yuhang/.cache/steel_dataset/step3_final_data/baike"),
     sample: bool = False,
     match: str = "",
     max_files = 10000000000,
