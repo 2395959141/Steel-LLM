@@ -48,14 +48,17 @@ logging.basicConfig(level=logging.DEBUG)
 name = "steel_llm"
 out_dir = Path("/DATA/disk2/yuhang/.cache/ckpt") / name
 TRAIN_DATA_DIR = Path("/DATA/disk2/yuhang/.cache/steel_dataset/step3_final_data/")
+out_dir = Path("/DATA/disk2/yuhang/.cache/ckpt") / name
+TRAIN_DATA_DIR = Path("/data/gu_data/step3_input")
 # TRAIN_DATA_DIR = Path("/data/step3_train_input/test")
 MODEL_PATH = "../model/steel_modify_from_qwen_1_5"
 # todo: check block size
 BLOCK_SIZE = 2048
 # bool / Path
 # resume model and data
-RESUME = Path("/data/gu_data/ckpt/steel_llm/step-860000-iter-6880000-ckpt")
-# RESUME = Path("/home/calfa100/gqs/Steel-LLM/pretrain_modify_from_TinyLlama/pretrain/out/steel_llm/step-200000-iter-1600000-ckpt")
+RESUME = False
+#RESUME = Path("/DATA/disk2/yuhang/.cache/ckpt")
+#RESUME = Path("/home/calfa100/gqs/Steel-LLM/pretrain_modify_from_TinyLlama/pretrain/out/steel_llm/step-200000-iter-1600000-ckpt")
 ONLY_RESUME_MODEL =  False
 ADD_NEW_DATA_DIR = None
 # qwen moe pad_token_id
@@ -65,25 +68,26 @@ USE_FLASH_ATTN =True # "auto"
 #! 设置超参数
 #! 训练设备和批量大小设置
 num_of_devices = 4
+# Hyperparameters
+num_of_devices = 4
 global_batch_size = 64*num_of_devices
 learning_rate = 3e-4
 micro_batch_size = 16
 # cal step 1: 1640*10**9/4/2048/512 
 # cal day 1: 1800*10**9/4/2048/8/1.4/8/3600/24
 # cal day2: 1640*10**9/4/8/23800/3600/24
-max_step = 430000*2+220000
+max_step = 200000*2+220000
 # lr scheduler
 #! 学习率调度器相关参数
 decay_lr = True
 lr_decay_step = int(max_step)
 min_lr = 0.0
-warmup_steps = 1_000
-
-#! 日志和检查点相关参数
+warmup_steps = 2_000
+#---
 log_step_interval = 20
 eval_iters = 100 # eval iter
-save_step_interval = 20000
-eval_step_interval = 20000
+save_step_interval = 10000
+eval_step_interval = 10000
  
 #! 优化器相关参数
 weight_decay = 0.05
@@ -111,7 +115,13 @@ train_data_config = [
     ("chinese_fine_web_edu", 174),
     ("industry_corpus2", 634),
     ("star_code", 147),
+    ("baike", 9.4),
+    ("cc_ic_HQ", 491),
+    ("chinese_fine_web_edu", 174),
+    ("industry_corpus2", 634),
+    ("star_code", 147),
 ]
+
 
 val_data_config = [
     ("validation", 1.0),
@@ -135,7 +145,13 @@ def setup(
 ) -> None:
     precision = precision or get_default_supported_precision(training=True, tpu=False)
     print(precision)
-    config = AutoConfig.from_pretrained(model_path,trust_remote_code=True)
+    #config = AutoConfig.from_pretrained(model_path,trust_remote_code=True)
+    config = AutoConfig.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2",
+        use_custom_rmsnorm=True
+    )
     print(config)
     if devices > 1: 
         # todo: check param
@@ -412,6 +428,10 @@ def create_dataloaders(
             )
     else:
         val_dataloader, val_datasets = None, None
+
+    print("训练数据配置：", train_data_config)
+    for name, weight in train_data_config:
+        print(f"数据集: {name}, 权重: {weight}")
             
     return train_dataloader, val_dataloader, train_datasets, val_datasets
 
