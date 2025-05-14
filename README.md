@@ -12,10 +12,10 @@
 
 ## 📝 项目简介
 
-`tiny_llm_1.4b`参考了多个开源的从零预训练大模型项目，使用了1.5TB的中英文混合数据进行训练。
+`tiny_llm_1.4b`参考了steel-llm的从零预训练大模型项目，使用了1.5TB的中英文混合数据进行训练。
 训练开始时间：2025/5/15，目前仍在训练中...
 
-## 🔗 参考开源项目
+## 🔗 学习过程参考开源项目
 
 - [steel-llm](https://github.com/zhanshijinwat/Steel-LLM)
 - [minimind](https://github.com/jingyaogong/minimind)
