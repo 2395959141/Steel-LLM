@@ -115,11 +115,6 @@ train_data_config = [
     ("chinese_fine_web_edu", 174),
     ("industry_corpus2", 634),
     ("star_code", 147),
-    ("baike", 9.4),
-    ("cc_ic_HQ", 491),
-    ("chinese_fine_web_edu", 174),
-    ("industry_corpus2", 634),
-    ("star_code", 147),
 ]
 
 
