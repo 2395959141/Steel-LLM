@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from transformers.trainer_utils import set_seed
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from transformers.generation import GenerationConfig
 
 '''
@@ -19,24 +19,61 @@ python evaluate_ceval.py -d data/ceval/
 '''
 
 def load_models_tokenizer(args):
+    tokenizer_path = "/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2___5-0___5B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(
-        args.checkpoint_path,
-        pad_token='<|extra_0|>',
+        tokenizer_path,
+        pad_token='<|endoftext|>',
         eos_token='<|endoftext|>',
         padding_side='left',
         trust_remote_code=True
     )
+    model_config = AutoConfig.from_pretrained(
+        args.checkpoint_path,
+        trust_remote_code=True
+    )
+    model_config.vocab_size = len(tokenizer)
+    if tokenizer.pad_token_id is not None:
+        model_config.pad_token_id = tokenizer.pad_token_id
+    else:
+        print("警告: tokenizer.pad_token_id 在设置 pad_token 后仍然是 None。")
     model = AutoModelForCausalLM.from_pretrained(
         args.checkpoint_path,
-        pad_token_id=tokenizer.pad_token_id,
+        config=model_config,
         device_map="auto",
         trust_remote_code=True
     ).eval()
-    model.generation_config = GenerationConfig.from_pretrained(
-        args.checkpoint_path,
-        pad_token_id=tokenizer.pad_token_id,
-        trust_remote_code=True
-    )
+    if model.get_input_embeddings().weight.shape[0] != len(tokenizer):
+        print(f"模型的嵌入层词汇表大小 ({model.get_input_embeddings().weight.shape[0]}) "
+              f"与 tokenizer 的词汇表大小 ({len(tokenizer)}) 不匹配。正在调整大小...")
+        model.resize_token_embeddings(len(tokenizer))
+        if tokenizer.pad_token_id is not None:
+            model.config.pad_token_id = tokenizer.pad_token_id
+    try:
+        generation_config = GenerationConfig.from_pretrained(
+            tokenizer_path,
+            trust_remote_code=True
+        )
+        print(f"已从 {tokenizer_path} 加载 GenerationConfig。")
+    except OSError:
+        print(f"在 {tokenizer_path} 未找到 generation_config.json。尝试从模型路径 {args.checkpoint_path} 加载。")
+        try:
+            generation_config = GenerationConfig.from_pretrained(
+                args.checkpoint_path,
+                trust_remote_code=True
+            )
+            print(f"已从 {args.checkpoint_path} 加载 GenerationConfig。")
+        except OSError:
+            print(f"在 {args.checkpoint_path} 也未找到 generation_config.json。初始化一个新的 GenerationConfig。")
+            generation_config = GenerationConfig()
+    if tokenizer.pad_token_id is not None:
+        generation_config.pad_token_id = tokenizer.pad_token_id
+    if tokenizer.eos_token_id is not None:
+        generation_config.eos_token_id = tokenizer.eos_token_id
+    model.generation_config = generation_config
+    if model.config.pad_token_id != tokenizer.pad_token_id and tokenizer.pad_token_id is not None:
+        print(f"警告: model.config.pad_token_id ({model.config.pad_token_id}) "
+              f"与 tokenizer.pad_token_id ({tokenizer.pad_token_id}) 不一致。正在设置...")
+        model.config.pad_token_id = tokenizer.pad_token_id
     return model, tokenizer
 
 
@@ -71,18 +108,19 @@ def get_logits(tokenizer, model, inputs: List[str]):
                 {"role": "user", "content": inputs[0]}
                 ]
     print(messages)
-    inputs = tokenizer.apply_chat_template(
+    formatted_chat_string = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
-    input_ids = tokenizer(inputs, padding='longest')["input_ids"]
-    input_ids = torch.tensor(input_ids, device=model.device)
+    tokenized_output = tokenizer([formatted_chat_string], padding='longest')
+    input_ids = torch.tensor(tokenized_output["input_ids"], device=model.device)
     tokens = {"input_ids": input_ids}
     attention_mask = input_ids.ne(tokenizer.pad_token_id)
 
     outputs = model.generate(
             input_ids,
+            attention_mask=attention_mask,
             max_new_tokens=1,
             temperature = 0.001,
             output_scores = True,
@@ -91,8 +129,8 @@ def get_logits(tokenizer, model, inputs: List[str]):
     # 输出答案
     generated_ids = outputs["sequences"]
     generated_ids = [
-    output_ids[len(input_ids):] for input_ids, output_ids in zip(input_ids, generated_ids)
-]
+        output_seq[len(input_seq):] for input_seq, output_seq in zip(input_ids, generated_ids)
+    ]
     generated_str = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     print("string:",generated_str,len(outputs["scores"])) 
     outputs = outputs["scores"]
@@ -452,7 +490,7 @@ if __name__ == "__main__":
         "--checkpoint-path",
         type=str,
         help="Checkpoint path",
-        default="/xxx/Steel-LLM/steel-llm-step-1060000-ckpt",
+        default="/home/chenyuhang/Steel-LLM/pretrain_modify_from_TinyLlama/model/steel_modify_from_qwen_1_5",
     )
     parser.add_argument("-s", "--seed", type=int, default=1234, help="Random seed")
 
@@ -460,7 +498,7 @@ if __name__ == "__main__":
     group = parser.add_argument_group(title="Evaluation options")
     group.add_argument(
         "-d", "--eval_data_path", type=str, required=False, help="Path to eval data",
-        default="/xxx/data_struct/eval/data/ceval"
+        default="/DATA/disk2/yuhang/.cache/modelscope/datasets/opencompass/ceval-exam"
     )
     group.add_argument(
         "--max-seq-len",
