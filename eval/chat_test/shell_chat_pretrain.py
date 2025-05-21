@@ -11,111 +11,178 @@ steel_model_dir = parent_dir / "pretrain_modify_from_TinyLlama" / "model" / "ste
 tokenizer_dir = "/DATA/disk2/yuhang/.cache/modelscope/models/Qwen/Qwen2___5-0___5B-Instruct"
 
 sys.path.append(str(parent_dir))
-sys.path.append(str(steel_model_dir))  # 添加模型目录到路径中
+sys.path.append(str(steel_model_dir))
 
-# 导入SteelLLM模型和tokenizer
 from pretrain_modify_from_TinyLlama.model.steel_modify_from_qwen_1_5.modeling_steel import SteelForCausalLM
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, TextStreamer, GenerationConfig
 
-# 设置设备
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"使用设备: {device}")
 
-# 1. 加载 state.pth 文件
-checkpoint_path = "/DATA/disk2/yuhang/.cache/ckpt/steel_llm/step-050000-iter-400000-ckpt/state.pth"
+checkpoint_path = "/DATA/disk2/yuhang/.cache/ckpt/steel_llm/sft_pth/checkpoint-11800.pth"
+print(f"从以下路径加载检查点: {checkpoint_path}")
 state = torch.load(checkpoint_path, map_location=device)
 
-# 2. 获取模型配置
+print(f"从以下路径加载模型配置: {steel_model_dir}")
+config_kwargs = {
+    "trust_remote_code": True,
+    "use_custom_rmsnorm": True,
+}
+if torch.cuda.is_available():
+    config_kwargs["attn_implementation"] = "flash_attention_2"
+
 config = AutoConfig.from_pretrained(
     str(steel_model_dir),
-    trust_remote_code=True,
-    attn_implementation="flash_attention_2" if torch.cuda.is_available() else None,
-    use_custom_rmsnorm=True
+    **config_kwargs
 )
 
-# 设置block_size和flash_attn
-block_size = 200
-config.block_size = block_size
-config.use_flash_attn = torch.cuda.is_available()
+# 使用配置中的 max_position_embeddings 作为 block_size
+# 如果需要，可以覆盖： config.max_position_embeddings = new_value
+print(f"模型配置加载完成。Block size (max_position_embeddings): {config.max_position_embeddings}")
 
-# 3. 初始化模型
+print("初始化模型结构...")
 model = SteelForCausalLM(config)
+print("模型结构初始化完成。")
 
-# 4. 将state中的权重加载到模型中
-model.load_state_dict(state["model"], strict=True)
+print("加载模型权重...")
+model_state_dict = None
+try:
+    if 'model' in state:
+        model_state_dict = state["model"]
+    elif 'module' in state and 'model' in state['module']:
+        model_state_dict = state['module']['model']
+        print("从 state['module']['model'] 加载权重 (可能来自 DDP 检查点).")
+    elif 'state_dict' in state:
+         model_state_dict = state["state_dict"]
+         print("从 state['state_dict'] 加载权重.")
+    else:
+        is_model_state_dict_at_top_level = all(
+            any(key.startswith(p_name) for p_name in dict(model.named_parameters()).keys()) or
+            any(p_name.startswith(key) for p_name in dict(model.named_parameters()).keys())
+            for key in state.keys()
+        )
+        if len(state.keys()) > 0 and is_model_state_dict_at_top_level :
+             print("警告: 'model' key 未在检查点中找到。尝试直接从顶层加载权重。")
+             model_state_dict = state
+        else:
+            raise KeyError(f"'model' key 或可识别的模型状态字典未在检查点中找到。可用 keys: {state.keys()}")
+
+    if model_state_dict is None:
+        raise ValueError("未能从检查点中提取 model_state_dict。")
+
+    load_result = model.load_state_dict(model_state_dict, strict=True)
+    print(f"模型权重加载成功: {load_result}")
+except Exception as e:
+    print(f"加载模型权重时出错 (strict=True): {e}")
+    if model_state_dict is not None:
+        print("尝试使用 strict=False 进行加载...")
+        try:
+            load_result = model.load_state_dict(model_state_dict, strict=False)
+            print(f"模型权重使用 strict=False 加载成功: {load_result}")
+            if load_result.missing_keys:
+                print(f"缺失的键: {load_result.missing_keys}")
+            if load_result.unexpected_keys:
+                print(f"非预期的键: {load_result.unexpected_keys}")
+        except Exception as e2:
+            print(f"使用 strict=False 加载模型权重时再次出错: {e2}")
+            print("请检查检查点文件和模型结构是否匹配。")
+            sys.exit(1)
+    else:
+        print("无法尝试 strict=False 加载，因为 model_state_dict 未被提取。")
+        sys.exit(1)
+
 model.to(device)
+print(f"模型已移至设备: {device}")
+print(f"模型原始数据类型: {next(model.parameters()).dtype}")
+model = model.half()
+print(f"模型已转换为半精度 (fp16)。当前数据类型: {next(model.parameters()).dtype}")
 model.eval()
+print("模型已设置为评估模式。")
 
-# 5. 加载tokenizer
+print(f"从以下路径加载Tokenizer: {tokenizer_dir}")
 tokenizer = AutoTokenizer.from_pretrained(
     str(tokenizer_dir),
-    trust_remote_code=True
+    trust_remote_code=True,
+    use_fast=True
 )
+if tokenizer.pad_token is None:
+    if tokenizer.eos_token is not None:
+        print(f"Tokenizer pad_token 未设置，将使用 eos_token ('{tokenizer.eos_token}') 作为 pad_token。")
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id # 确保ID也同步
+    else:
+        print("警告: Tokenizer pad_token 和 eos_token 均未设置。添加一个默认的 pad_token '<|pad|>'")
+        tokenizer.add_special_tokens({'pad_token': '<|pad|>'}) # 使用Qwen风格的特殊token格式
+        model.resize_token_embeddings(len(tokenizer))
+        # 确保config中的pad_token_id也更新，如果模型实现依赖它
+        if hasattr(model.config, 'pad_token_id'):
+            model.config.pad_token_id = tokenizer.pad_token_id
 
-# 6. 构建对话模板
+
+print(f"Tokenizer pad_token: '{tokenizer.pad_token}', ID: {tokenizer.pad_token_id}")
+print(f"Tokenizer eos_token: '{tokenizer.eos_token}', ID: {tokenizer.eos_token_id}")
+
 def build_prompt(history):
-    prompt = ""
+    prompt_parts = []
     for i, (query, response) in enumerate(history):
-        prompt += f"用户: {query}\n"
-        if response:
-            prompt += f"助手: {response}\n"
-    
-    # 最后一轮对话如果没有助手回复，添加助手提示符
-    if history and not history[-1][1]:
-        prompt += f"助手: "
-    
-    # 将<|im_end|>添加到输入文本的末尾
-    prompt += "<|im_end|>"
-    
-    return prompt.strip()
+        prompt_parts.append(f"用户: {query}")
+        if response: # 只有当回复存在时才添加
+            prompt_parts.append(f"助手: {response}")
 
-# 7. 使用transformers的generate函数进行推理
+    current_prompt = "\n".join(prompt_parts)
+
+    if history and not history[-1][1]: # 如果最后一轮是用户说的，且助手还没回复
+        current_prompt += f"\n助手:"
+    elif not history: # 如果历史为空（例如，直接开始一个新问题给助手）
+        # 这部分可以根据需要调整，例如如果第一个输入就是问题，则不需要"助手:"
+        pass # 或者 current_prompt = "助手:" 如果希望模型直接开始
+
+    # 根据用户要求，为预训练测试添加 <|im_end|>
+    # 注意: 如果 <|im_end|> 是 EOS token，模型可能在看到它后立即停止生成。
+    current_prompt += "<|im_end|>"
+    return current_prompt
+
 @torch.no_grad()
-def generate(prompt, max_new_tokens=100, temperature=0.8, top_p=0.9):
-    # 确保prompt不包含<|im_end|>，然后手动添加
-    if not prompt.endswith("<|im_end|>"):
-        prompt = prompt + "<|im_end|>"
-        
-    # 对输入进行编码
-    input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
-    
-    # 如果输入过长，截断到适合模型处理的长度
-    if input_ids.size(1) > config.block_size:
-        input_ids = input_ids[:, -config.block_size:]
-    
-    # 使用transformers的generate函数
-    streamer = None
+def generate(current_model, current_tokenizer, prompt_text, max_new_tokens=100, temperature=0.8, top_p=0.9):
+    input_ids = current_tokenizer.encode(prompt_text, return_tensors="pt", truncation=True, max_length=current_model.config.max_position_embeddings).to(device)
+
+    # 初始化 streamer 为 None
+    streamer_obj = None # 使用不同的变量名以示区分
     try:
-        from transformers import TextStreamer
-        streamer = TextStreamer(tokenizer, skip_special_tokens=True)
-    except:
-        print("无法导入TextStreamer，不进行流式输出")
-    
-    output_ids = model.generate(
-        input_ids,
+        streamer_obj = TextStreamer(current_tokenizer, skip_prompt=True, skip_special_tokens=True)
+        # print("TextStreamer 初始化成功。") # 用于调试
+    except ImportError:
+        print("transformers.TextStreamer 未找到或导入失败，不进行流式输出。")
+    except Exception as e_streamer:
+        print(f"初始化 TextStreamer 时出错: {e_streamer}，不进行流式输出。")
+
+    generation_config = GenerationConfig(
         max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        do_sample=True if temperature > 0 else False,
-        pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id else tokenizer.eos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
+        temperature=temperature if temperature > 0.01 else None,
+        top_p=top_p if temperature > 0.01 else None,
+        do_sample=True if temperature > 0.01 else False,
+        pad_token_id=current_tokenizer.pad_token_id,
+        eos_token_id=current_tokenizer.eos_token_id,
         repetition_penalty=1.05,
-        streamer=streamer,
         use_cache=True
     )
-    
-    # 获取新生成的token
-    generated_ids = output_ids[0, input_ids.size(1):]
-    
-    # 解码生成的文本
-    generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return generated_text
 
-# 清屏函数
+    output_ids = current_model.generate(
+        input_ids,
+        generation_config=generation_config,
+        streamer=streamer_obj # 直接传递 streamer_obj (可以是 None 或 TextStreamer 实例)
+    )
+
+    if streamer_obj is None: # 如果未使用流式输出 (streamer_obj 保持为 None)
+        generated_ids = output_ids[0, input_ids.size(1):]
+        generated_text = current_tokenizer.decode(generated_ids, skip_special_tokens=True)
+        return generated_text
+    else: # 如果使用了流式输出
+        return "" # 流式输出时，文本已打印到控制台
+
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-# 交互式对话
 def interactive_chat():
     history = []
     clear_screen()
@@ -124,102 +191,98 @@ def interactive_chat():
     print("输入'退出'或'exit'结束对话")
     print("输入'清空'或'clear'清除对话历史")
     print("输入'设置'或'settings'调整生成参数")
-    print("所有输入文本将自动添加<|im_end|>标记以测试预训练模型能力")
+    print("提示: 所有用户输入将用于构建一个包含<|im_end|>的提示以测试模型。")
     print("=" * 50)
-    
-    # 可调整的参数
+
     generation_params = {
         "max_new_tokens": 200,
-        "temperature": 0.7,  # 调整为更合适的温度
+        "temperature": 0.7,
         "top_p": 0.9
     }
-    
+
     while True:
-        user_input = input("\n用户: ")
-        
-        # 检查退出命令
+        user_input = input("\n用户: ").strip()
+        if not user_input:
+            continue
         if user_input.lower() in ['退出', 'exit', 'quit', 'q']:
             print("谢谢使用，再见！")
             break
-            
-        # 检查清空历史命令
         if user_input.lower() in ['清空', 'clear']:
             history = []
             clear_screen()
             print("对话历史已清空")
             continue
-            
-        # 检查设置命令
         if user_input.lower() in ['设置', 'settings']:
             try:
-                temp = float(input("请输入温度参数(0.1-1.0，当前值: {:.1f}): ".format(generation_params["temperature"])))
-                if 0.1 <= temp <= 1.0:
-                    generation_params["temperature"] = temp
-                    
-                tokens = int(input("请输入最大生成长度(10-500，当前值: {}): ".format(generation_params["max_new_tokens"])))
-                if 10 <= tokens <= 500:
-                    generation_params["max_new_tokens"] = tokens
-                    
-                print(f"参数已更新: 温度={generation_params['temperature']}, 最大长度={generation_params['max_new_tokens']}")
+                temp_str = input(f"请输入温度参数(0.0-1.0，当前值: {generation_params['temperature']:.1f}, 按回车跳过): ").strip()
+                if temp_str: generation_params["temperature"] = max(0.0, min(1.0, float(temp_str)))
+                tokens_str = input(f"请输入最大生成长度(10-1024，当前值: {generation_params['max_new_tokens']}, 按回车跳过): ").strip()
+                if tokens_str: generation_params["max_new_tokens"] = max(10, min(1024, int(tokens_str)))
+                print(f"参数已更新: 温度={generation_params['temperature']:.2f}, 最大长度={generation_params['max_new_tokens']}")
             except ValueError:
                 print("输入无效，保持原有设置")
             continue
-        
-        # 添加用户输入到历史
-        history.append((user_input, ""))
-        
-        # 构建完整提示
+
+        history.append((user_input, "")) # 助手回复暂时为空
         prompt = build_prompt(history)
-        
-        # 显示实际输入到模型的内容
-        print(f"\n实际输入到模型: {prompt}")
+
+        print(f"\n>>> 实际输入到模型的提示文本:\n---\n{prompt}\n---")
         print("\n助手: ", end="", flush=True)
-        
-        # 生成回复
-        response = generate(
-            prompt, 
-            max_new_tokens=generation_params["max_new_tokens"], 
-            temperature=generation_params["temperature"], 
+
+        response_text = generate(
+            model,
+            tokenizer,
+            prompt,
+            max_new_tokens=generation_params["max_new_tokens"],
+            temperature=generation_params["temperature"],
             top_p=generation_params["top_p"]
         )
-        
-        # 打印完整回复
-        print(response)
-        
-        # 更新历史
-        history[-1] = (user_input, response)
 
-# 8. 执行简单测试
-print("\n" + "="*50)
-print("测试模型能力（每个输入都会添加<|im_end|>标记以测试预训练模型）:")
-print("="*50)
+        # 如果 generate 函数返回了文本 (即非流式)，则打印它
+        if response_text: # "" (空字符串) 在布尔上下文中为 False
+            print(response_text, end="", flush=True) # end="" 以防 TextStreamer 也打印换行
+        print() # 确保在流式或非流式输出后都有换行
 
-# 测试对话格式
-print("\n测试对话格式:")
-test_prompt = "用户: 你好，请介绍一下你自己\n助手: "
-print(f"输入: {test_prompt}")
-print(f"实际输入到模型: {test_prompt}<|im_end|>")
-test_response = generate(test_prompt, max_new_tokens=100, temperature=0.7)
-print(f"输出: {test_response}")
+        cleaned_response = response_text.split("<|im_end|>")[0].strip() if response_text else ""
+        history[-1] = (user_input, cleaned_response) # 更新历史记录中的助手回复
 
-# 测试纯文本理解能力
-print("\n测试纯文本理解能力:")
-plain_test_prompt = "北京是中国的首都"
-print(f"输入: {plain_test_prompt}")
-print(f"实际输入到模型: {plain_test_prompt}<|im_end|>")
-plain_test_response = generate(plain_test_prompt, max_new_tokens=100, temperature=0.7)
-print(f"输出: {plain_test_response}")
+if __name__ == "__main__":
+    print("\n" + "="*50)
+    print("测试模型能力（每个输入都会添加<|im_end|>标记以测试预训练模型）:")
+    print("="*50)
 
-# 测试知识问答能力
-print("\n测试知识问答能力:")
-qa_test_prompt = "请介绍一下人工智能的发展历程"
-print(f"输入: {qa_test_prompt}")
-print(f"实际输入到模型: {qa_test_prompt}<|im_end|>")
-qa_test_response = generate(qa_test_prompt, max_new_tokens=150, temperature=0.7)
-print(f"输出: {qa_test_response}")
+    test_cases = [
+        ("你好，请介绍一下你自己", "测试对话格式:"),
+        ("北京是中国的首都", "测试纯文本理解能力:"),
+        ("请介绍一下人工智能的发展历程", "测试知识问答能力:")
+    ]
 
-# 9. 开始交互式对话
-print("\n" + "="*50)
-print("开始交互式对话...")
-print("="*50)
-interactive_chat()
+    for test_input, test_name in test_cases:
+        print(f"\n{test_name}")
+        current_history = [] # 为每个测试用例重置历史
+        if "助手:" not in test_input:
+            current_history.append((test_input, ""))
+        else:
+            parts = test_input.split("助手:")
+            user_q = parts[0].replace("用户:", "").strip()
+            current_history.append((user_q, "")) # 假设助手部分是空的，让build_prompt处理
+
+        test_prompt_built = build_prompt(current_history)
+
+        print(f"用户输入（用于构建提示）: {test_input}")
+        print(f">>> 实际输入到模型的提示文本:\n---\n{test_prompt_built}\n---")
+        print("助手: ", end="", flush=True)
+
+        test_response = generate(model, tokenizer, test_prompt_built, max_new_tokens=100, temperature=0.7)
+
+        # 如果 generate 函数返回了文本 (即非流式)，则打印它
+        if test_response: # "" (空字符串) 在布尔上下文中为 False
+            print(test_response, end="", flush=True)
+        print() # 确保换行
+        print("-" * 30)
+
+    print("\n" + "="*50)
+    input("按回车键开始交互式对话...")
+    # clear_screen() # 在进入交互前可以选择清屏
+    print("="*50)
+    interactive_chat()
