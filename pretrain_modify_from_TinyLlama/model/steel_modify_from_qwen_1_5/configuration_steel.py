@@ -84,7 +84,7 @@ class SteelConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=151936,
+        vocab_size=151665,
         hidden_size=4096,
         intermediate_size=22016,
         num_hidden_layers=32,
