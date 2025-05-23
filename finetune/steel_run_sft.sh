@@ -17,13 +17,15 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node 4 $LLaMA_PATH/src/train.p
     --model_name_or_path /home/chenyuhang/Steel-LLM/pretrain_modify_from_TinyLlama/model/steel_modify_from_qwen_1_5 \
     --cutoff_len 768 \
     --dataset_dir /DATA/disk2/yuhang/.cache/steel_dataset/sft_data/llamafactory_input \
-    --dataset baai_instruct_7m,code_feedback_custom,openhermes_custom \
+    --dataset baai_instruct_7m,code_feedback_custom,openhermes_custom,wanjuan_exam \
+    --mix_strategy interleave_over \
+    --interleave_probs 0.4,0.1,0.1,0.4 \
     --report_to wandb \
-    --run_name sft_120000 \
+    --run_name sft_190000 \
     --preprocessing_num_workers 72 \
     --template qwen \
     --finetuning_type full \
-    --output_dir ${OUTPUT_DIR}/Code-Feedback_Infinity-Instruct_7M_OpenHermes \
+    --output_dir ${OUTPUT_DIR}/Code-Feedback_Infinity-Instruct_7M_OpenHermes_190000 \
     --overwrite_output_dir \
     --overwrite_cache \
     --per_device_train_batch_size 26 \
